@@ -52,7 +52,6 @@ impl Default for TreeVec3 {
 }
 
 include!("shapes.rs");
-include!("generators.rs");
 include!("csg.rs");
 
 /// A collection of [`Tree`]s.

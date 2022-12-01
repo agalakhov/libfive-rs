@@ -1,6 +1,6 @@
 [package]
 name = "libfive-sys"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Moritz Moeller <virtualritz@protonmail.com>"]
 edition = "2018"
 readme = "README.md"
@@ -25,5 +25,5 @@ packed_opcodes = []
 
 [build-dependencies]
 cmake = "0.1.45"
-bindgen = "0.58.1"
+bindgen = "0.63.0"
 #vcpkg = "0.2.12"

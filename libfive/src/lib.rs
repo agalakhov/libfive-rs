@@ -36,10 +36,10 @@
 //!         .reflect_yz(),
 //!     ]);
 //!
-//! f_rep_shape.to_stl(
+//! f_rep_shape.save_stl(
 //!     "f-rep-shape.stl",
 //!     &Region3::new(-2.0, 2.0, -2.0, 2.0, -2.0, 2.0),
-//!     &BRepSettings::default(),
+//!     10.0,
 //! )?;
 //! # }
 //! ```
@@ -68,12 +68,10 @@
 use core::{
     convert::TryInto,
     ffi::c_void,
-    mem,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
     ptr, result, slice,
 };
 use libfive_sys as sys;
-use num_enum::{FromPrimitive, IntoPrimitive};
 use std::ffi::CString;
 
 #[cfg(feature = "ahash")]
@@ -217,67 +215,14 @@ impl<T: Point3> From<TriangleMesh<T>> for FlatTriangleMesh {
                 .positions
                 .into_iter()
                 .flat_map(|point| {
-                    std::array::IntoIter::new([point.x(), point.y(), point.z()])
+                    [point.x(), point.y(), point.z()]
                 })
                 .collect(),
             triangles: mesh
                 .triangles
                 .into_iter()
-                .flat_map(|triangle| std::array::IntoIter::new(triangle))
+                .flat_map(|triangle| triangle)
                 .collect(),
-        }
-    }
-}
-
-/// The algorithm used for computing a
-/// [boundary representation](https://en.wikipedia.org/wiki/Boundary_representation)
-/// from a [`Tree`].
-#[derive(Copy, Clone, Debug, Eq, FromPrimitive, IntoPrimitive, PartialEq)]
-#[repr(u32)]
-pub enum BRepAlgorithm {
-    #[num_enum(default)]
-    DualContouring = sys::libfive_brep_alg_DUAL_CONTOURING as _,
-    IsoSimplex = sys::libfive_brep_alg_ISO_SIMPLEX as _,
-    Hybrid = sys::libfive_brep_alg_HYBRID as _,
-}
-
-/// [Boundary representation](https://en.wikipedia.org/wiki/Boundary_representation)
-/// settings passed to any of the rendering/export functions.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct BRepSettings {
-    /// The meshing region is subdivided until the smallest region's edge is
-    /// below 1/`resolution` in size. Make this larger to get a higher
-    /// resolution model.
-    ///
-    /// In other words: should be approximately half the model's smallest
-    /// feature size. Subdivision halts when all sides of the region are below
-    /// it.
-    pub resolution: f32,
-    /// This value is used when deciding whether to collapse cells. If it is
-    /// very large, then only linear regions are merged.  Set as `0.1` to
-    /// completely disable cell merging.
-    pub quality: f32,
-    /// Number of worker threads to use while meshing.  Set as 0 to use the
-    /// platform's-default number of threads.
-    pub workers: u32,
-    /// The meshing algorithm.
-    pub algorithm: BRepAlgorithm,
-}
-
-/// Defaults for rendering a [`Tree`].
-///
-/// `resolution`: `10`
-/// `quality`: `8`
-/// `workers`: `0` (determined automatically)
-/// `algorithm`: [`DualContouring`](BRepAlgorithm::DualContouring)
-impl Default for BRepSettings {
-    fn default() -> Self {
-        let s = unsafe { sys::libfive_brep_settings_default() };
-        Self {
-            resolution: s.res,
-            quality: s.quality,
-            workers: s.workers,
-            algorithm: s.alg.into(),
         }
     }
 }
@@ -381,18 +326,16 @@ impl Evaluator {
         }
     }
 
-    pub fn to_stl(
+    pub fn save_stl(
         &self,
         path: impl Into<Vec<u8>>,
         region: &Region3,
-        settings: &BRepSettings,
     ) -> Result<()> {
         let path = CString::new(path).unwrap();
         if unsafe {
             sys::libfive_evaluator_save_mesh(
                 self.0,
                 region.0,
-                mem::transmute(*settings),
                 path.as_ptr(),
             )
         } {
@@ -546,7 +489,6 @@ macro_rules! op_binary {
 /// These features are dependent on the `stdlib` feature being enabled.
 ///
 /// * [Shapes](#shapes)
-/// * [Generators](#generators)
 /// * [Constructive solid geometry](#csg)
 /// * [Transformations](#transforms)
 /// * [Text](#text)
@@ -656,14 +598,11 @@ impl Tree {
 ///   quadtree/octree.For clean lines/triangles, it should be near-cubical.But
 ///   this is not a hard requirement.
 ///
-/// * `settings` -- See [`BRepSettings`].
+/// * `resolution` -- should be approximately half the model's smallest
+///   feature size. Subdivision halts when all sides of the region are
+///   below it.
 impl Tree {
     /// Renders a 2D slice at the given `z` height into a [`Bitmap`].
-    ///
-    /// ## Arguments
-    /// * `resolution` -- Should be approximately half the model's smallest
-    ///   feature size. Subdivision halts when all sides of the region are below
-    ///   it.
     #[inline]
     pub fn to_bitmap(
         &self,
@@ -680,13 +619,13 @@ impl Tree {
     pub fn to_triangle_mesh<T: Point3>(
         &self,
         region: &Region3,
-        settings: &BRepSettings,
+        resolution: f32,
     ) -> Option<TriangleMesh<T>> {
         match unsafe {
             sys::libfive_tree_render_mesh(
                 self.0,
                 region.0,
-                mem::transmute(*settings),
+                resolution,
             )
             .as_mut()
         } {
@@ -725,14 +664,14 @@ impl Tree {
         &self,
         region: Region2,
         z: f32,
-        settings: &BRepSettings,
+        resolution: f32,
     ) -> Option<Vec<Contour<T>>> {
         match unsafe {
             sys::libfive_tree_render_slice(
                 self.0,
                 region.0,
                 z,
-                mem::transmute(*settings),
+                resolution,
             )
             .as_mut()
         } {
@@ -771,14 +710,14 @@ impl Tree {
         &self,
         region: Region2,
         z: f32,
-        settings: &BRepSettings,
+        resolution: f32,
     ) -> Option<Vec<Contour<T>>> {
         let raw_contours = unsafe {
             sys::libfive_tree_render_slice3(
                 self.0,
                 region.0,
                 z,
-                mem::transmute(*settings),
+                resolution,
             )
             .as_ref()
         };
@@ -814,12 +753,12 @@ impl Tree {
     }
 
     /// Computes a contour and saves it to `path` in [`SVG`](https://en.wikipedia.org/wiki/Scalable_Vector_Graphics) format.
-    pub fn to_svg(
+    pub fn save_svg(
         &self,
         path: impl Into<Vec<u8>>,
         region: &Region2,
         z: f32,
-        settings: &BRepSettings,
+        resolution: f32,
     ) -> Result<()> {
         let path = CString::new(path).unwrap();
         if unsafe {
@@ -827,7 +766,7 @@ impl Tree {
                 self.0,
                 region.0,
                 z,
-                mem::transmute(*settings),
+                resolution,
                 path.as_ptr(),
             )
         } {
@@ -838,18 +777,18 @@ impl Tree {
     }
 
     /// Computes a mesh and saves it to `path` in [`STL`](https://en.wikipedia.org/wiki/STL_(file_format)) format.
-    pub fn to_stl(
+    pub fn save_stl(
         &self,
         path: impl Into<Vec<u8>>,
         region: &Region3,
-        settings: &BRepSettings,
+        resolution: f32,
     ) -> Result<()> {
         let path = CString::new(path).unwrap();
         if unsafe {
             sys::libfive_tree_save_mesh(
                 self.0,
                 region.0,
-                mem::transmute(*settings),
+                resolution,
                 path.as_ptr(),
             )
         } {
@@ -917,11 +856,11 @@ pub use stdlib::*;
 fn test_2d() -> Result<()> {
     let circle = Tree::x().square() + Tree::y().square() - 1.0.into();
 
-    circle.to_svg(
+    circle.save_svg(
         "circle.svg",
         &Region2::new(-2.0, 2.0, -2.0, 2.0),
         0.0,
-        &BRepSettings::default(),
+        10.0,
     )?;
 
     Ok(())
@@ -952,15 +891,15 @@ fn test_3d() -> Result<()> {
             .reflect_yz(),
         ]);
 
-    f_rep_shape.to_stl(
+    f_rep_shape.save_stl(
         "f-rep-shape.stl",
         &Region3::new(-2.0, 2.0, -2.0, 2.0, -2.0, 2.0),
-        &BRepSettings::default(),
+        10.0,
     )?;
 
     Ok(())
 }
-/*
+
 #[test]
 #[cfg(feature = "stdlib")]
 fn test_eval_3d() -> Result<()> {
@@ -993,13 +932,10 @@ fn test_eval_3d() -> Result<()> {
     //let mut evaluator = Evaluator::new(&csg_shape, &variables);
     //evaluator.update(&variables);
 
-    csg_shape.to_stl(
+    csg_shape.save_stl(
         "csg_shape.stl",
         &Region3::new(-2.0, 2.0, -2.0, 2.0, -2.0, 2.0),
-        &BRepSettings {
-            //workers: 0,
-            ..Default::default()
-        },
+        10.0,
     )?;
     /*
     variables.set("inner_radius", 0.4);
@@ -1012,4 +948,4 @@ fn test_eval_3d() -> Result<()> {
     )?;*/
 
     Ok(())
-}*/
+}

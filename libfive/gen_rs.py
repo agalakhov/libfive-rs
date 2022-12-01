@@ -5,9 +5,10 @@ from itertools import repeat
 import parse
 
 ################################################################################
-def arg_in(a, use_self):
+def arg_in(item, use_self):
+    (index, a) = item
     if a.type == 'libfive_tree':
-        if use_self and a.index == 0:
+        if use_self and index == 0:
             return 'self'
         else:
             return '{}: Tree'.format(a.name)
@@ -24,9 +25,10 @@ def arg_in(a, use_self):
     else:
         raise RuntimeError("Unknown type %s" % a.type)
 
-def arg_out(a, use_self):
+def arg_out(item, use_self):
+    (index, a) = item
     if a.type == 'libfive_tree':
-        if use_self and a.index == 0:
+        if use_self and index == 0:
             return 'self.0'
         else:
             return '{}.0'.format(a.name)
@@ -43,44 +45,21 @@ def arg_out(a, use_self):
     else:
         raise RuntimeError("Unknown type %s" % a.type)
 
-def format_module_modifier(lib, m):
+def format_module(lib, m, use_self):
     out = '''
 /// # {} <a name="{}"></a>
 impl Tree {{
 '''.format(m.title(), m)
 
     for f in lib[m].shapes:
-        args_in = ", ".join(map(arg_in, f.args, repeat(True)))
-        args_out = ", ".join(map(arg_out, f.args, repeat(True)))
+        args_in = ", ".join(map(arg_in, enumerate(f.args), repeat(use_self)))
+        args_out = ", ".join(map(arg_out, enumerate(f.args), repeat(use_self)))
         out += '''
     pub fn {name}({args_in}) -> Self {{
-        Self(unsafe {{ sys::{raw_name}{u}({args_out}) }})
+        Self(unsafe {{ sys::{raw_name}({args_out}) }})
     }}
-'''.format(name='moveit' if f.name.endswith('move') else f.name,
-           raw_name=f.raw_name,
-           u='',
-           args_in=args_in,
-           args_out=args_out)
-
-    out += '}'
-    return out
-
-def format_module_generator(lib, m):
-    out = '''
-/// # {} <a name="{}"></a>
-impl Tree {{
-'''.format(m.title(), m)
-
-    for f in lib[m].shapes:
-        args_in = ", ".join(map(arg_in, f.args, repeat(False)))
-        args_out = ", ".join(map(arg_out, f.args, repeat(False)))
-        out += '''
-    pub fn {name}({args_in}) -> Self {{
-        Self(unsafe {{ sys::{raw_name}{u}({args_out}) }})
-    }}
-'''.format(name=f.name,
-           raw_name=f.raw_name,
-           u='',
+'''.format(name='translate' if f.name == 'move' else f.name,
+           raw_name='move_' if f.name == 'move' else (f.raw_name or f.name),
            args_in=args_in,
            args_out=args_out)
 
@@ -121,24 +100,26 @@ def write_header(f, m):
 '''.format(m, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), os.getlogin()))
 
 stdlib = parse.parse_stdlib()
-for m in ['csg', 'transforms']:
+
+all_modules = [
+    ('csg', True),
+    ('transforms', True),
+    ('shapes', False),
+]
+for (m, use_self) in all_modules:
     with open('../bind/rust/libfive/stdlib/%s.rs' % m, 'w') as f:
         write_header(f, m)
-        f.write(format_module_modifier(stdlib, m))
-
-for m in ['shapes', 'generators']:
-     with open('../bind/rust/libfive/stdlib/%s.rs' % m, 'w') as f:
-        write_header(f, m)
-        f.write(format_module_generator(stdlib, m))
+        f.write(format_module(stdlib, m, use_self))
 
 f = open('../bind/rust/libfive/stdlib/text.rs', 'w')
+write_header(f, 'text')
 f.write(
 '''
 /// # Text <a name="text"></a>
 impl Tree {
     pub fn text(txt: impl Into<Vec<u8>>, pos: TreeVec2) -> Self {
         let txt = std::ffi::CString::new(txt).unwrap();
-        Self(unsafe { sys::libfivestd_text(txt.as_ptr(), sys::tvec2 { x: pos.x.0, y: pos.y.0 }) })
+        Self(unsafe { sys::text(txt.as_ptr(), sys::tvec2 { x: pos.x.0, y: pos.y.0 }) })
     }
 }
 '''
